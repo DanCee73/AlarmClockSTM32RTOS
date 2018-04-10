@@ -21,6 +21,7 @@
 #define SEGDIG_7 SEG_d_Pin | SEG_e_Pin | SEG_f_Pin | SEG_g_Pin | SEG_h_Pin
 #define SEGDIG_8 SEG_h_Pin
 #define SEGDIG_9 SEG_e_Pin | SEG_h_Pin
+#define ALLSEG SEG_a_Pin | SEG_b_Pin | SEG_c_Pin | SEG_d_Pin | SEG_e_Pin | SEG_f_Pin | SEG_g_Pin | SEG_h_Pin
 
 
 #define ANODE_A ANODE_A_Pin
@@ -28,7 +29,8 @@
 #define ANODE_C
 #define ANODE_D
 
-
+//FUNCTION PROTOTYPES
+void write_digit(uint8_t num);
 
 
 #endif /* SEG_H_ */

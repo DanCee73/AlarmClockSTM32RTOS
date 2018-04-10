@@ -79,8 +79,8 @@
 #define BOOT1_GPIO_Port GPIOB
 #define SEG_a_Pin GPIO_PIN_7
 #define SEG_a_GPIO_Port GPIOE
-#define SEB_b_Pin GPIO_PIN_8
-#define SEB_b_GPIO_Port GPIOE
+#define SEG_b_Pin GPIO_PIN_8
+#define SEG_b_GPIO_Port GPIOE
 #define SEG_c_Pin GPIO_PIN_9
 #define SEG_c_GPIO_Port GPIOE
 #define SEG_d_Pin GPIO_PIN_10
@@ -93,9 +93,9 @@
 #define SEG_g_GPIO_Port GPIOE
 #define SEG_h_Pin GPIO_PIN_14
 #define SEG_h_GPIO_Port GPIOE
-#define ANODE_A_Pin GPIO_PIN_15
-#define ANODE_A_GPIO_Port GPIOE
-#define ANODE_B_Pin GPIO_PIN_10
+#define ANODE_A_Pin GPIO_PIN_10
+#define ANODE_A_GPIO_Port GPIOB
+#define ANODE_B_Pin GPIO_PIN_12
 #define ANODE_B_GPIO_Port GPIOB
 #define LD4_Pin GPIO_PIN_12
 #define LD4_GPIO_Port GPIOD

@@ -9,3 +9,9 @@
 #include "cmsis_os.h"
 #include "seg.h"
 
+/*
+ *
+ * Eventually fill this with general functions to display the LED display.
+ *
+ *
+ */

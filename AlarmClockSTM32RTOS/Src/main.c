@@ -72,7 +72,11 @@ osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-
+TaskHandle_t taskH_display_time;
+TimerHandle_t second;
+uint16_t segdis[] = {SEGDIG_0, SEGDIG_1, SEGDIG_2, SEGDIG_3, SEGDIG_4, SEGDIG_5, SEGDIG_6, SEGDIG_7, SEGDIG_8, SEGDIG_9};
+uint16_t anodes[] = {ANODE_A_Pin, ANODE_B_Pin};
+BaseType_t sec_exp;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,7 +91,8 @@ void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
-
+static void prvDisplayTime(void *p);
+static void prvSecExp(TimerHandle_t xTimer);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -111,7 +116,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -129,6 +134,9 @@ int main(void)
   MX_SPI1_Init();
   MX_SDIO_SD_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
+  //  xTaskCreate(prvTaskB, "TaskB", configMINIMAL_STACK_SIZE, NULL, 2, &taskB);
+  xTaskCreate(prvDisplayTime, "TimeDisplay", configMINIMAL_STACK_SIZE, NULL, 1 , &taskH_display_time);
 
   /* USER CODE END 2 */
 
@@ -142,6 +150,8 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
+  second = xTimerCreate("segment_update", pdMS_TO_TICKS(1000), pdFALSE, ( void * ) 0, prvSecExp);
+  xTimerStart(second, portMAX_DELAY);
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the thread(s) */
@@ -372,26 +382,26 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, CS_I2C_SPI_Pin|SEG_a_Pin|SEB_b_Pin|SEG_c_Pin 
+  HAL_GPIO_WritePin(GPIOE, CS_I2C_SPI_Pin|SEG_a_Pin|SEG_b_Pin|SEG_c_Pin 
                           |SEG_d_Pin|SEG_e_Pin|SEG_f_Pin|SEG_g_Pin 
-                          |SEG_h_Pin|ANODE_A_Pin, GPIO_PIN_RESET);
+                          |SEG_h_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin 
                           |Audio_RST_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : CS_I2C_SPI_Pin SEG_a_Pin SEB_b_Pin SEG_c_Pin 
+  /*Configure GPIO pins : CS_I2C_SPI_Pin SEG_a_Pin SEG_b_Pin SEG_c_Pin 
                            SEG_d_Pin SEG_e_Pin SEG_f_Pin SEG_g_Pin 
-                           SEG_h_Pin ANODE_A_Pin */
-  GPIO_InitStruct.Pin = CS_I2C_SPI_Pin|SEG_a_Pin|SEB_b_Pin|SEG_c_Pin 
+                           SEG_h_Pin */
+  GPIO_InitStruct.Pin = CS_I2C_SPI_Pin|SEG_a_Pin|SEG_b_Pin|SEG_c_Pin 
                           |SEG_d_Pin|SEG_e_Pin|SEG_f_Pin|SEG_g_Pin 
-                          |SEG_h_Pin|ANODE_A_Pin;
+                          |SEG_h_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -424,12 +434,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : ANODE_B_Pin */
-  GPIO_InitStruct.Pin = ANODE_B_Pin;
+  /*Configure GPIO pins : ANODE_A_Pin ANODE_B_Pin */
+  GPIO_InitStruct.Pin = ANODE_A_Pin|ANODE_B_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(ANODE_B_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin 
                            Audio_RST_Pin */
@@ -463,7 +473,59 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+static void prvDisplayTime(void *p)
+{
+	(void) p;
+	int number;
+	int tens;
+	int ones;
 
+
+	while(1)
+	{
+		number = 0;
+
+		xTimerReset(second, portMAX_DELAY); //Reset the timer if it hasn't already been reset
+		while(number < 100) //Let's test count to 99
+		{
+			//While the timer hasn't expired, run the code below, otherwise on expiry, increment "number" and reset timer
+			if(sec_exp == pdFALSE)
+			{
+				tens = number / 10;		//Get tens digit
+				ones = number % 10;		//Get ones digit
+
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin | ANODE_B_Pin, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode A
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[tens], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin | ANODE_B_Pin, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode B
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[ones], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+			}
+			else
+			{
+				number++;
+				sec_exp = pdFALSE;
+				xTimerReset(second, portMAX_DELAY);
+			}
+		}
+	}
+}
+
+static void prvSecExp(TimerHandle_t xTimer)
+{
+	(void) xTimer;
+
+	sec_exp = pdTRUE;
+}
 /* USER CODE END 4 */
 
 /* StartDefaultTask function */
