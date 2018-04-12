@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Project>
-<ProjectName>/home/eric/Dev/School/AlarmClockSTM32RTOS/AlarmClockSTM32RTOS/\AlarmClockSTM32RTOS</ProjectName>
+<ProjectName>/home/drakonus/Dev/School/Embedded OS/AlarmClockSTM32RTOS/AlarmClockSTM32RTOS/\AlarmClockSTM32RTOS</ProjectName>
 <ProjectNature>C</ProjectNature> 
 <CMSIS>../Drivers/CMSIS</CMSIS>
-<HAL_Driver>/home/eric/STM32Cube/Repository//STM32Cube_FW_F4_V1.21.0/Drivers/CMSIS</HAL_Driver>
+<HAL_Driver>/home/drakonus/STM32Cube/Repository//STM32Cube_FW_F4_V1.21.0/Drivers/CMSIS</HAL_Driver>
 <Toolchain>TrueSTUDIO</Toolchain>
 <Version>0</Version>
 

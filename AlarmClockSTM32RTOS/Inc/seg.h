@@ -25,9 +25,11 @@
 
 
 #define ANODE_A ANODE_A_Pin
-#define ANODE_B ANODE_B_Pin /// THIS IS ON PORT B
-#define ANODE_C
-#define ANODE_D
+#define ANODE_B ANODE_B_Pin
+#define ANODE_C ANODE_C_Pin
+#define ANODE_D ANODE_D_Pin
+#define ALL_ANODE ANODE_A | ANODE_B | ANODE_C | ANODE_D
+#define ANODE_BASE ANODE_A_GPIO_Port
 
 //FUNCTION PROTOTYPES
 void write_digit(uint8_t num);

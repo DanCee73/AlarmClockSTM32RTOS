@@ -67,14 +67,18 @@
 #define OTG_FS_PowerSwitchOn_GPIO_Port GPIOC
 #define PDM_OUT_Pin GPIO_PIN_3
 #define PDM_OUT_GPIO_Port GPIOC
-#define B1_Pin GPIO_PIN_0
-#define B1_GPIO_Port GPIOA
 #define SPI1_SCK_Pin GPIO_PIN_5
 #define SPI1_SCK_GPIO_Port GPIOA
 #define SPI1_MISO_Pin GPIO_PIN_6
 #define SPI1_MISO_GPIO_Port GPIOA
 #define SPI1_MOSI_Pin GPIO_PIN_7
 #define SPI1_MOSI_GPIO_Port GPIOA
+#define hr_btn_Pin GPIO_PIN_0
+#define hr_btn_GPIO_Port GPIOB
+#define hr_btn_EXTI_IRQn EXTI0_IRQn
+#define min_btn_Pin GPIO_PIN_1
+#define min_btn_GPIO_Port GPIOB
+#define min_btn_EXTI_IRQn EXTI1_IRQn
 #define BOOT1_Pin GPIO_PIN_2
 #define BOOT1_GPIO_Port GPIOB
 #define SEG_a_Pin GPIO_PIN_7
@@ -97,6 +101,10 @@
 #define ANODE_A_GPIO_Port GPIOB
 #define ANODE_B_Pin GPIO_PIN_12
 #define ANODE_B_GPIO_Port GPIOB
+#define ANODE_C_Pin GPIO_PIN_13
+#define ANODE_C_GPIO_Port GPIOB
+#define ANODE_D_Pin GPIO_PIN_14
+#define ANODE_D_GPIO_Port GPIOB
 #define LD4_Pin GPIO_PIN_12
 #define LD4_GPIO_Port GPIOD
 #define LD3_Pin GPIO_PIN_13
@@ -129,8 +137,6 @@
 #define Audio_SCL_GPIO_Port GPIOB
 #define Audio_SDA_Pin GPIO_PIN_9
 #define Audio_SDA_GPIO_Port GPIOB
-#define MEMS_INT2_Pin GPIO_PIN_1
-#define MEMS_INT2_GPIO_Port GPIOE
 
 /* ########################## Assert Selection ############################## */
 /**

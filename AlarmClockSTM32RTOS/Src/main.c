@@ -75,11 +75,20 @@ osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-TaskHandle_t taskH_display_time;
-TimerHandle_t second;
+RTC_TimeTypeDef current_time = NULL;
+
+TaskHandle_t taskH_display_time = NULL;
+
+TimerHandle_t second = NULL;
+
 uint16_t segdis[] = {SEGDIG_0, SEGDIG_1, SEGDIG_2, SEGDIG_3, SEGDIG_4, SEGDIG_5, SEGDIG_6, SEGDIG_7, SEGDIG_8, SEGDIG_9};
 uint16_t anodes[] = {ANODE_A_Pin, ANODE_B_Pin};
-BaseType_t sec_exp;
+
+BaseType_t sec_exp = NULL;
+BaseType_t pwr_reset = NULL;
+
+SemaphoreHandle_t sem_hr_task = NULL;
+SemaphoreHandle_t sem_min_task = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -96,6 +105,7 @@ void StartDefaultTask(void const * argument);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 static void prvDisplayTime(void *p);
+static void prvPwrOn(void *p);
 static void prvSecExp(TimerHandle_t xTimer);
 /* USER CODE END PFP */
 
@@ -120,7 +130,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-  HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -139,7 +148,12 @@ int main(void)
   MX_SDIO_SD_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(ANODE_BASE, ALL_ANODE, GPIO_PIN_SET);
+  current_time.Hours = (uint8_t) 17;
+  current_time.Minutes = (uint8_t) 51;
+  current_time.Seconds = 0b00000000;
+
+  HAL_RTC_SetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
   //  xTaskCreate(prvTaskB, "TaskB", configMINIMAL_STACK_SIZE, NULL, 2, &taskB);
   xTaskCreate(prvDisplayTime, "TimeDisplay", configMINIMAL_STACK_SIZE, NULL, 1 , &taskH_display_time);
 
@@ -239,7 +253,7 @@ void SystemClock_Config(void)
   }
 
   PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_HSE_DIV10;
+  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_HSE_DIV8;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
@@ -310,8 +324,8 @@ static void MX_RTC_Init(void)
     */
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.AsynchPrediv = 124;
+  hrtc.Init.SynchPrediv = 7999;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
   hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
@@ -395,8 +409,8 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -410,7 +424,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin 
@@ -442,11 +456,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pins : hr_btn_Pin min_btn_Pin */
+  GPIO_InitStruct.Pin = hr_btn_Pin|min_btn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BOOT1_Pin */
   GPIO_InitStruct.Pin = BOOT1_Pin;
@@ -454,8 +468,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : ANODE_A_Pin ANODE_B_Pin */
-  GPIO_InitStruct.Pin = ANODE_A_Pin|ANODE_B_Pin;
+  /*Configure GPIO pins : ANODE_A_Pin ANODE_B_Pin ANODE_C_Pin ANODE_D_Pin */
+  GPIO_InitStruct.Pin = ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -484,11 +498,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : MEMS_INT2_Pin */
-  GPIO_InitStruct.Pin = MEMS_INT2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(MEMS_INT2_GPIO_Port, &GPIO_InitStruct);
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
 }
 
@@ -496,49 +511,101 @@ static void MX_GPIO_Init(void)
 static void prvDisplayTime(void *p)
 {
 	(void) p;
-	int number;
-	int tens;
-	int ones;
-	char numbuf[4];
+	uint8_t hh = 0;
+	uint8_t mm = 0;
+	uint8_t ss = 0;
+	uint8_t old_ss;
+	int hours_tens;
+	int hours_ones;
+	int mins_tens;
+	int mins_ones;
 
+	char numbuf[4];
 
 	while(1)
 	{
-		number = 0;
 
 		xTimerReset(second, portMAX_DELAY); //Reset the timer if it hasn't already been reset
-		while(number < 100) //Let's test count to 99
+
+		//While the timer hasn't expired, run the code below, otherwise on expiry, increment "number" and reset timer
+		if(sec_exp == pdFALSE)
 		{
-			//While the timer hasn't expired, run the code below, otherwise on expiry, increment "number" and reset timer
-			if(sec_exp == pdFALSE)
-			{
-				tens = number / 10;		//Get tens digit
-				ones = number % 10;		//Get ones digit
 
-				//Clear all anodes
-				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin | ANODE_B_Pin, GPIO_PIN_RESET);
-				//Clear all cathodes, set cathodes for tens spot, then set anode A
-				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
-				HAL_GPIO_WritePin(GPIOE_BASE, segdis[tens], GPIO_PIN_SET);
-				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin, GPIO_PIN_SET);
-				HAL_Delay(1);
+			HAL_RTC_GetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
+			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			hh = current_time.Hours;
+			mm = current_time.Minutes;
+			ss = current_time.Seconds;
 
-				//Clear all anodes
-				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ANODE_A_Pin | ANODE_B_Pin, GPIO_PIN_RESET);
-				//Clear all cathodes, set cathodes for tens spot, then set anode B
-				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
-				HAL_GPIO_WritePin(GPIOE_BASE, segdis[ones], GPIO_PIN_SET);
-				HAL_GPIO_WritePin(ANODE_B_GPIO_Port, ANODE_B_Pin, GPIO_PIN_SET);
-				HAL_Delay(1);
-			}
-			else
+			hours_tens = hh / 10;
+			hours_ones = hh % 10;
+			mins_tens = mm / 10;
+			mins_ones = mm % 10;
+
+			//THOUSANDS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode A
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[hours_tens], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_D_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//HUNDREDS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode B
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[hours_ones], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_C_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//TENS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode A
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[mins_tens], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_B_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//ONES DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode B
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[mins_ones], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_A_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			if(old_ss != ss)
 			{
-				number++;
-				itoa(number, numbuf, 10);
+				itoa(hh, numbuf, 10);
+				_write(numbuf);
+				_write(":");
+				itoa(mm, numbuf, 10);
+				_write(numbuf);
+				_write(":");
+				itoa(ss, numbuf, 10);
 				_writeln(numbuf);
-				sec_exp = pdFALSE;
-				xTimerReset(second, portMAX_DELAY);
+				old_ss = ss;
 			}
+		}
+		else
+		{
+			//convert to string for debugging
+			itoa(hh, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(mm, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(ss, numbuf, 10);
+			_writeln(numbuf);
+			_writeln(" ");
+
+			sec_exp = pdFALSE;
+			xTimerReset(second, portMAX_DELAY);
 		}
 	}
 }
@@ -548,6 +615,13 @@ static void prvSecExp(TimerHandle_t xTimer)
 	(void) xTimer;
 
 	sec_exp = pdTRUE;
+}
+
+static void prvPwrOn(void *p)
+{
+	(void) p;
+
+	/// TODO: Default running task on powerup. Like the flashing 12:00 you see on clocks when the power goes out
 }
 /* USER CODE END 4 */
 
