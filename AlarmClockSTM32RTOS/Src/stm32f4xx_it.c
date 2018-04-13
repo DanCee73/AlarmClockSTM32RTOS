@@ -37,6 +37,10 @@
 #include "cmsis_os.h"
 
 /* USER CODE BEGIN 0 */
+extern BaseType_t pwr_reset;
+extern SemaphoreHandle_t sem_hr_task;
+extern SemaphoreHandle_t sem_min_task;
+extern SemaphoreHandle_t sem_kill_task;
 
 /* USER CODE END 0 */
 
@@ -77,12 +81,16 @@ void EXTI0_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI0_IRQn 0 */
 
-			//INTERRUPT HANDLER FOR HOUR BUTTON
-
   /* USER CODE END EXTI0_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
   /* USER CODE BEGIN EXTI0_IRQn 1 */
-
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+  if(pwr_reset == pdTRUE)
+  {
+	  xSemaphoreGiveFromISR(sem_kill_task, NULL);
+	  pwr_reset = pdFALSE;
+  }
+  xSemaphoreGiveFromISR(sem_hr_task, NULL);
   /* USER CODE END EXTI0_IRQn 1 */
 }
 
@@ -98,7 +106,13 @@ void EXTI1_IRQHandler(void)
   /* USER CODE END EXTI1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
   /* USER CODE BEGIN EXTI1_IRQn 1 */
-
+	  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+	  if(pwr_reset == pdTRUE)
+	  {
+		  xSemaphoreGiveFromISR(sem_kill_task, NULL);
+		  pwr_reset = pdFALSE;
+	  }
+	  xSemaphoreGiveFromISR(sem_min_task, NULL);
   /* USER CODE END EXTI1_IRQn 1 */
 }
 
