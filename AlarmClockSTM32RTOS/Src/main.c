@@ -54,13 +54,12 @@
 #include "usb_host.h"
 
 /* USER CODE BEGIN Includes */
+#include "seg.h"
 #include "debug.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 DAC_HandleTypeDef hdac;
-
-I2C_HandleTypeDef hi2c1;
 
 RTC_HandleTypeDef hrtc;
 
@@ -74,13 +73,29 @@ osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
+RTC_TimeTypeDef current_time;
 
+TaskHandle_t taskH_display_time = NULL;
+TaskHandle_t taskH_startup_task = NULL;
+
+TimerHandle_t second = NULL;
+
+uint16_t segdis[] = {SEGDIG_0, SEGDIG_1, SEGDIG_2, SEGDIG_3, SEGDIG_4, SEGDIG_5, SEGDIG_6, SEGDIG_7, SEGDIG_8, SEGDIG_9};
+uint16_t anodes[] = {ANODE_A_Pin, ANODE_B_Pin};
+
+BaseType_t sec_exp = NULL;
+BaseType_t pwr_reset = pdTRUE;
+BaseType_t in_task = pdFALSE;
+
+SemaphoreHandle_t sem_hr_task = NULL;
+SemaphoreHandle_t sem_min_task = NULL;
+SemaphoreHandle_t sem_reset_state = NULL;
+SemaphoreHandle_t sem_kill_task = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_RTC_Init(void);
 static void MX_DAC_Init(void);
 static void MX_SPI1_Init(void);
@@ -90,7 +105,13 @@ void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
+static void prvDisplayTime(void *p);
+static void prvPwrOn(void *p);
+static void prvSecExp(TimerHandle_t xTimer);
 
+static void prvIncHr(void *p);
+static void prvIncMin(void *p);
+static void prvKillTask(void *p);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -124,14 +145,23 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
   MX_RTC_Init();
   MX_DAC_Init();
   MX_SPI1_Init();
   MX_SDIO_SD_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(ANODE_BASE, ALL_ANODE, GPIO_PIN_SET);
+  current_time.Hours = (uint8_t) 12;
+  current_time.Minutes = (uint8_t) 00;
+  current_time.Seconds = 0b00000000;
 
+  HAL_RTC_SetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
+  xTaskCreate(prvDisplayTime, "TimeDisplay", configMINIMAL_STACK_SIZE, NULL, 3 , &taskH_display_time);
+  xTaskCreate(prvPwrOn, "PwrOn", configMINIMAL_STACK_SIZE, NULL, 4, &taskH_startup_task);
+  xTaskCreate(prvIncHr, "AddHour", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+  xTaskCreate(prvIncMin, "AddMin", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+  xTaskCreate(prvKillTask, "Kill_task", configMINIMAL_STACK_SIZE, NULL, 6, NULL);
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -140,11 +170,18 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  sem_reset_state = xSemaphoreCreateBinary();
+  sem_hr_task = xSemaphoreCreateBinary();
+  sem_min_task = xSemaphoreCreateBinary();
+  sem_kill_task = xSemaphoreCreateBinary();
+
+  xSemaphoreGive(sem_reset_state);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
-  _writeln("Hello");
+  second = xTimerCreate("segment_update", pdMS_TO_TICKS(1000), pdFALSE, ( void * ) 0, prvSecExp);
+  xTimerStart(second, portMAX_DELAY);
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the thread(s) */
@@ -227,7 +264,7 @@ void SystemClock_Config(void)
   }
 
   PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_HSE_DIV10;
+  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_HSE_DIV8;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
@@ -270,26 +307,6 @@ static void MX_DAC_Init(void)
 
 }
 
-/* I2C1 init function */
-static void MX_I2C1_Init(void)
-{
-
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-}
-
 /* RTC init function */
 static void MX_RTC_Init(void)
 {
@@ -298,8 +315,8 @@ static void MX_RTC_Init(void)
     */
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.AsynchPrediv = 124;
+  hrtc.Init.SynchPrediv = 7999;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
   hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
@@ -375,6 +392,8 @@ static void MX_USART2_UART_Init(void)
         * EXTI
      PC3   ------> I2S2_SD
      PC7   ------> I2S3_MCK
+     PB6   ------> I2C1_SCL
+     PB9   ------> I2C1_SDA
 */
 static void MX_GPIO_Init(void)
 {
@@ -398,7 +417,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin, GPIO_PIN_RESET);
+
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin 
@@ -415,12 +438,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : OTG_FS_PowerSwitchOn_Pin */
-  GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin;
+  /*Configure GPIO pins : OTG_FS_PowerSwitchOn_Pin alarm_set_Pin */
+  GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin|alarm_set_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(OTG_FS_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PDM_OUT_Pin */
   GPIO_InitStruct.Pin = PDM_OUT_Pin;
@@ -430,11 +453,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pins : hr_btn_Pin min_btn_Pin set_alarm_btn_Pin */
+  GPIO_InitStruct.Pin = hr_btn_Pin|min_btn_Pin|set_alarm_btn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BOOT1_Pin */
   GPIO_InitStruct.Pin = BOOT1_Pin;
@@ -442,8 +465,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : ANODE_A_Pin ANODE_B_Pin */
-  GPIO_InitStruct.Pin = ANODE_A_Pin|ANODE_B_Pin;
+  /*Configure GPIO pins : ANODE_A_Pin ANODE_B_Pin ANODE_C_Pin ANODE_D_Pin */
+  GPIO_InitStruct.Pin = ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -472,16 +495,268 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : MEMS_INT2_Pin */
-  GPIO_InitStruct.Pin = MEMS_INT2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(MEMS_INT2_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pins : Audio_SCL_Pin Audio_SDA_Pin */
+  GPIO_InitStruct.Pin = Audio_SCL_Pin|Audio_SDA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
 /* USER CODE BEGIN 4 */
+static void prvDisplayTime(void *p)
+{
+	(void) p;
+	uint8_t hh = 0;
+	uint8_t mm = 0;
+	uint8_t ss = 0;
+	uint8_t old_ss;
+	int hours_tens;
+	int hours_ones;
+	int mins_tens;
+	int mins_ones;
 
+	char numbuf[4];
+
+	while(1)
+	{
+
+		xTimerReset(second, portMAX_DELAY); //Reset the timer if it hasn't already been reset
+
+		//While the timer hasn't expired, run the code below, otherwise on expiry, increment "number" and reset timer
+		if(sec_exp == pdFALSE)
+		{
+			HAL_RTC_GetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
+			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			hh = current_time.Hours;
+			mm = current_time.Minutes;
+			ss = current_time.Seconds;
+
+			hours_tens = hh / 10;
+			hours_ones = hh % 10;
+			mins_tens = mm / 10;
+			mins_ones = mm % 10;
+
+			//THOUSANDS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode A
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[hours_tens], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_D_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//HUNDREDS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode B
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[hours_ones], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_C_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//TENS DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode A
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[mins_tens], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_B_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			//ONES DIGIT
+			//Clear all anodes
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			//Clear all cathodes, set cathodes for tens spot, then set anode B
+			HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOE_BASE, segdis[mins_ones], GPIO_PIN_SET);
+			HAL_GPIO_WritePin(ANODE_BASE, ANODE_A_Pin, GPIO_PIN_SET);
+			HAL_Delay(1);
+
+			if(old_ss != ss)
+				{
+					itoa(hh, numbuf, 10);
+					_write(numbuf);
+					_write(":");
+					itoa(mm, numbuf, 10);
+					_write(numbuf);
+					_write(":");
+					itoa(ss, numbuf, 10);
+					_writeln(numbuf);
+					old_ss = ss;
+				}
+		}
+
+		else
+		{
+			//convert to string for debugging
+			itoa(hh, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(mm, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(ss, numbuf, 10);
+			_writeln(numbuf);
+			_writeln(" ");
+
+			sec_exp = pdFALSE;
+			xTimerReset(second, portMAX_DELAY);
+		}
+	}
+}
+
+static void prvSecExp(TimerHandle_t xTimer)
+{
+	(void) xTimer;
+	sec_exp = pdTRUE;
+}
+
+static void prvPwrOn(void *p)
+{
+	(void) p;
+	int i;
+	/// TODO: Default running task on powerup. Like the flashing 12:00 you see on clocks when the power goes out
+	while(1)
+	{
+		if(xSemaphoreTake(sem_reset_state, portMAX_DELAY) == pdTRUE)
+		{
+			i = 0;
+			while(i < 100)
+			{
+				//THOUSANDS DIGIT
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode A
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[1], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_BASE, ANODE_D_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+
+				//HUNDREDS DIGIT
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode B
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[2], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_BASE, ANODE_C_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+
+				//TENS DIGIT
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode A
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[0], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_BASE, ANODE_B_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+
+				//ONES DIGIT
+				//Clear all anodes
+				HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+				//Clear all cathodes, set cathodes for tens spot, then set anode B
+				HAL_GPIO_WritePin(GPIOE_BASE, ALLSEG, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOE_BASE, segdis[0], GPIO_PIN_SET);
+				HAL_GPIO_WritePin(ANODE_BASE, ANODE_A_Pin, GPIO_PIN_SET);
+				HAL_Delay(1);
+				i++;
+			}
+
+			i = 0;
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+
+			while(i < 400)
+			{
+				HAL_Delay(1);
+				i++;
+			}
+
+			if(pwr_reset == pdTRUE)
+				xSemaphoreGive(sem_reset_state);
+			/*
+			 * else
+				vTaskDelete(NULL);
+			*/
+		}
+	}
+}
+
+static void prvIncHr(void *p)
+{
+	(void) p;
+	RTC_TimeTypeDef buf_time = current_time;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_hr_task, portMAX_DELAY) == pdTRUE)
+		{
+			in_task = pdTRUE;
+			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			buf_time.Hours++;
+			if (buf_time.Hours > 23)
+				buf_time.Hours = 0;
+			buf_time.Seconds = 0;
+			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			vTaskDelay(pdMS_TO_TICKS(350));
+			in_task= pdFALSE;
+		}
+	}
+}
+
+static void prvIncMin(void *p)
+{
+	(void) p;
+	RTC_TimeTypeDef buf_time = current_time;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_min_task, portMAX_DELAY) == pdTRUE)
+		{
+			in_task = pdTRUE;
+			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			buf_time.Minutes++;
+			if (buf_time.Minutes > 59)
+				buf_time.Minutes = 0;
+			buf_time.Seconds = 0;
+			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			vTaskDelay(pdMS_TO_TICKS(350));
+			in_task= pdFALSE;
+		}
+	}
+}
+
+static void prvKillTask(void *p)
+{
+	(void) p;
+	RTC_TimeTypeDef buf_time = current_time;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_kill_task, portMAX_DELAY) == pdTRUE)
+		{
+			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
+			vTaskDelete(taskH_startup_task);
+			buf_time.Hours = 00;
+			buf_time.Minutes = 00;
+			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+
+		}
+	}
+}
 /* USER CODE END 4 */
 
 /* StartDefaultTask function */
