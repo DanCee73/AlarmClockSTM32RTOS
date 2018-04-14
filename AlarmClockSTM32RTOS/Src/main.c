@@ -115,7 +115,6 @@ static void prvKillTask(void *p);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
-
 /* USER CODE END 0 */
 
 /**
@@ -183,7 +182,6 @@ int main(void)
   /* start timers, add new ones, ... */
   second = xTimerCreate("segment_update", pdMS_TO_TICKS(1000), pdFALSE, ( void * ) 0, prvSecExp);
   xTimerStart(second, portMAX_DELAY);
-
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the thread(s) */
@@ -404,8 +402,8 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -423,6 +421,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin, GPIO_PIN_RESET);
+
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin 
