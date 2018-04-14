@@ -73,6 +73,8 @@
 #define SPI1_MISO_GPIO_Port GPIOA
 #define SPI1_MOSI_Pin GPIO_PIN_7
 #define SPI1_MOSI_GPIO_Port GPIOA
+#define alarm_set_Pin GPIO_PIN_5
+#define alarm_set_GPIO_Port GPIOC
 #define hr_btn_Pin GPIO_PIN_0
 #define hr_btn_GPIO_Port GPIOB
 #define hr_btn_EXTI_IRQn EXTI0_IRQn
@@ -105,6 +107,9 @@
 #define ANODE_C_GPIO_Port GPIOB
 #define ANODE_D_Pin GPIO_PIN_14
 #define ANODE_D_GPIO_Port GPIOB
+#define set_alarm_btn_Pin GPIO_PIN_15
+#define set_alarm_btn_GPIO_Port GPIOB
+#define set_alarm_btn_EXTI_IRQn EXTI15_10_IRQn
 #define LD4_Pin GPIO_PIN_12
 #define LD4_GPIO_Port GPIOD
 #define LD3_Pin GPIO_PIN_13

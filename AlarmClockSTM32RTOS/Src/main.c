@@ -85,6 +85,7 @@ uint16_t anodes[] = {ANODE_A_Pin, ANODE_B_Pin};
 
 BaseType_t sec_exp = NULL;
 BaseType_t pwr_reset = pdTRUE;
+BaseType_t in_task = pdFALSE;
 
 SemaphoreHandle_t sem_hr_task = NULL;
 SemaphoreHandle_t sem_min_task = NULL;
@@ -418,6 +419,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -435,12 +439,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : OTG_FS_PowerSwitchOn_Pin */
-  GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin;
+  /*Configure GPIO pins : OTG_FS_PowerSwitchOn_Pin alarm_set_Pin */
+  GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin|alarm_set_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(OTG_FS_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PDM_OUT_Pin */
   GPIO_InitStruct.Pin = PDM_OUT_Pin;
@@ -450,8 +454,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : hr_btn_Pin min_btn_Pin */
-  GPIO_InitStruct.Pin = hr_btn_Pin|min_btn_Pin;
+  /*Configure GPIO pins : hr_btn_Pin min_btn_Pin set_alarm_btn_Pin */
+  GPIO_InitStruct.Pin = hr_btn_Pin|min_btn_Pin|set_alarm_btn_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -506,6 +510,9 @@ static void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI1_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
@@ -621,14 +628,14 @@ static void prvSecExp(TimerHandle_t xTimer)
 static void prvPwrOn(void *p)
 {
 	(void) p;
-	unsigned long int i;
+	int i;
 	/// TODO: Default running task on powerup. Like the flashing 12:00 you see on clocks when the power goes out
 	while(1)
 	{
 		if(xSemaphoreTake(sem_reset_state, portMAX_DELAY) == pdTRUE)
 		{
 			i = 0;
-			while(i < 100UL)
+			while(i < 100)
 			{
 				//THOUSANDS DIGIT
 				//Clear all anodes
@@ -671,7 +678,7 @@ static void prvPwrOn(void *p)
 			i = 0;
 			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
 
-			while(i < 400UL)
+			while(i < 400)
 			{
 				HAL_Delay(1);
 				i++;
@@ -696,12 +703,16 @@ static void prvIncHr(void *p)
 	{
 		if(xSemaphoreTake(sem_hr_task, portMAX_DELAY) == pdTRUE)
 		{
+			in_task = pdTRUE;
 			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
 			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
 			buf_time.Hours++;
 			if (buf_time.Hours > 23)
 				buf_time.Hours = 0;
+			buf_time.Seconds = 0;
 			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			vTaskDelay(pdMS_TO_TICKS(350));
+			in_task= pdFALSE;
 		}
 	}
 }
@@ -715,12 +726,16 @@ static void prvIncMin(void *p)
 	{
 		if(xSemaphoreTake(sem_min_task, portMAX_DELAY) == pdTRUE)
 		{
+			in_task = pdTRUE;
 			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
 			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
 			buf_time.Minutes++;
 			if (buf_time.Minutes > 59)
 				buf_time.Minutes = 0;
+			buf_time.Seconds = 0;
 			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			vTaskDelay(pdMS_TO_TICKS(350));
+			in_task= pdFALSE;
 		}
 	}
 }
@@ -728,6 +743,7 @@ static void prvIncMin(void *p)
 static void prvKillTask(void *p)
 {
 	(void) p;
+	RTC_TimeTypeDef buf_time = current_time;
 
 	while(1)
 	{
@@ -735,6 +751,10 @@ static void prvKillTask(void *p)
 		{
 			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
 			vTaskDelete(taskH_startup_task);
+			buf_time.Hours = 00;
+			buf_time.Minutes = 00;
+			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+
 		}
 	}
 }
