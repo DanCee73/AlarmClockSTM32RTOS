@@ -73,8 +73,6 @@ osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-RTC_TimeTypeDef current_time;
-
 TaskHandle_t taskH_display_time = NULL;
 TaskHandle_t taskH_startup_task = NULL;
 
@@ -83,25 +81,32 @@ TimerHandle_t second = NULL;
 uint16_t segdis[] = {SEGDIG_0, SEGDIG_1, SEGDIG_2, SEGDIG_3, SEGDIG_4, SEGDIG_5, SEGDIG_6, SEGDIG_7, SEGDIG_8, SEGDIG_9};
 uint16_t anodes[] = {ANODE_A_Pin, ANODE_B_Pin};
 
-BaseType_t sec_exp = NULL;
+BaseType_t sec_exp = pdFALSE;
 BaseType_t pwr_reset = pdTRUE;
 BaseType_t in_task = pdFALSE;
+BaseType_t alarm_set_mode = pdFALSE;
+BaseType_t alarm_on = pdFALSE;
+BaseType_t alarm_stop = pdFALSE;
 
 SemaphoreHandle_t sem_hr_task = NULL;
 SemaphoreHandle_t sem_min_task = NULL;
 SemaphoreHandle_t sem_reset_state = NULL;
 SemaphoreHandle_t sem_kill_task = NULL;
+SemaphoreHandle_t sem_alarm_mode = NULL;
+SemaphoreHandle_t sem_alarm_toggle = NULL;
+SemaphoreHandle_t sem_alarm_fire = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_RTC_Init(void);
 static void MX_DAC_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SDIO_SD_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_RTC_Init(void);
 void StartDefaultTask(void const * argument);
+static void MX_NVIC_Init(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -112,6 +117,11 @@ static void prvSecExp(TimerHandle_t xTimer);
 static void prvIncHr(void *p);
 static void prvIncMin(void *p);
 static void prvKillTask(void *p);
+static void prvAlarmMode(void *p);
+static void prvToggleAlarm(void *p);
+
+static void prvFireAlarm(void *p);
+
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -145,23 +155,26 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_RTC_Init();
   MX_DAC_Init();
   MX_SPI1_Init();
   MX_SDIO_SD_Init();
   MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(ANODE_BASE, ALL_ANODE, GPIO_PIN_SET);
-  current_time.Hours = (uint8_t) 12;
-  current_time.Minutes = (uint8_t) 00;
-  current_time.Seconds = 0b00000000;
+  MX_RTC_Init();
 
-  HAL_RTC_SetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
+  /* Initialize interrupts */
+  MX_NVIC_Init();
+  /* USER CODE BEGIN 2 */
+  	  // ERIC CODE START
+  HAL_GPIO_WritePin(ANODE_BASE, ALL_ANODE, GPIO_PIN_SET);
   xTaskCreate(prvDisplayTime, "TimeDisplay", configMINIMAL_STACK_SIZE, NULL, 3 , &taskH_display_time);
   xTaskCreate(prvPwrOn, "PwrOn", configMINIMAL_STACK_SIZE, NULL, 4, &taskH_startup_task);
   xTaskCreate(prvIncHr, "AddHour", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
   xTaskCreate(prvIncMin, "AddMin", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+  xTaskCreate(prvAlarmMode, "AlarmSetMode", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
   xTaskCreate(prvKillTask, "Kill_task", configMINIMAL_STACK_SIZE, NULL, 6, NULL);
+  xTaskCreate(prvToggleAlarm, "AlarmToggle", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+  xTaskCreate(prvFireAlarm, "RunAlarm", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+  	  //ERIC CODE END
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -170,18 +183,28 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  	  //ERIC CODE START
   sem_reset_state = xSemaphoreCreateBinary();
   sem_hr_task = xSemaphoreCreateBinary();
   sem_min_task = xSemaphoreCreateBinary();
   sem_kill_task = xSemaphoreCreateBinary();
+  sem_alarm_mode = xSemaphoreCreateBinary();
+  sem_alarm_toggle = xSemaphoreCreateBinary();
+  sem_alarm_fire = xSemaphoreCreateBinary();
 
   xSemaphoreGive(sem_reset_state);
+  // TEMP FOR DEBUG
+  xSemaphoreGive(sem_kill_task);
+  pwr_reset = pdFALSE;
+  	  //ERIC CODE END
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
+  	  //ERIC CODE START
   second = xTimerCreate("segment_update", pdMS_TO_TICKS(1000), pdFALSE, ( void * ) 0, prvSecExp);
   xTimerStart(second, portMAX_DELAY);
+  	  //ERIC CODE END
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the thread(s) */
@@ -282,6 +305,17 @@ void SystemClock_Config(void)
   HAL_NVIC_SetPriority(SysTick_IRQn, 15, 0);
 }
 
+/**
+  * @brief NVIC Configuration.
+  * @retval None
+  */
+static void MX_NVIC_Init(void)
+{
+  /* RTC_Alarm_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 11, 0);
+  HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
+}
+
 /* DAC init function */
 static void MX_DAC_Init(void)
 {
@@ -311,11 +345,16 @@ static void MX_DAC_Init(void)
 static void MX_RTC_Init(void)
 {
 
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+  RTC_AlarmTypeDef sAlarm;
+
     /**Initialize RTC Only 
     */
   hrtc.Instance = RTC;
+if(HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR0) != 0x32F2){
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 124;
+  hrtc.Init.AsynchPrediv = 127;
   hrtc.Init.SynchPrediv = 7999;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
@@ -323,6 +362,49 @@ static void MX_RTC_Init(void)
   if (HAL_RTC_Init(&hrtc) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
+  }
+
+    /**Initialize RTC and set the Time and Date 
+    */
+  sTime.Hours = 0x1;
+  sTime.Minutes = 0x30;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = RTC_MONTH_JANUARY;
+  sDate.Date = 0x1;
+  sDate.Year = 0x18;
+
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+    /**Enable the Alarm A 
+    */
+  sAlarm.AlarmTime.Hours = 0x1;
+  sAlarm.AlarmTime.Minutes = 0x31;
+  sAlarm.AlarmTime.Seconds = 0x0;
+  sAlarm.AlarmTime.SubSeconds = 0x0;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY|RTC_ALARMMASK_SECONDS;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 0x1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+    HAL_RTCEx_BKUPWrite(&hrtc,RTC_BKP_DR0,0x32F2);
   }
 
 }
@@ -402,8 +484,8 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -417,11 +499,13 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, ANODE_A_Pin|ANODE_B_Pin|ANODE_C_Pin|ANODE_D_Pin, GPIO_PIN_RESET);
-
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin 
@@ -452,6 +536,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : alarm_on_led_Pin */
+  GPIO_InitStruct.Pin = alarm_on_led_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(alarm_on_led_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : alarm_EN_Pin */
+  GPIO_InitStruct.Pin = alarm_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(alarm_EN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : hr_btn_Pin min_btn_Pin set_alarm_btn_Pin */
   GPIO_InitStruct.Pin = hr_btn_Pin|min_btn_Pin|set_alarm_btn_Pin;
@@ -510,13 +607,16 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI1_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 10, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
 /* USER CODE BEGIN 4 */
-static void prvDisplayTime(void *p)
+static void prvDisplayTime(void *p) //ERIC
 {
 	(void) p;
 	uint8_t hh = 0;
@@ -530,19 +630,31 @@ static void prvDisplayTime(void *p)
 
 	char numbuf[4];
 
+	RTC_TimeTypeDef buf_time;
+	RTC_AlarmTypeDef alarm_time;
+
 	while(1)
 	{
 
 		xTimerReset(second, portMAX_DELAY); //Reset the timer if it hasn't already been reset
 
-		//While the timer hasn't expired, run the code below, otherwise on expiry, increment "number" and reset timer
 		if(sec_exp == pdFALSE)
 		{
-			HAL_RTC_GetTime(&hrtc, &current_time, RTC_FORMAT_BIN);
-			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
-			hh = current_time.Hours;
-			mm = current_time.Minutes;
-			ss = current_time.Seconds;
+			if(alarm_set_mode == pdFALSE)
+			{
+				HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+				HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			}
+			else
+			{
+				HAL_RTC_GetAlarm(&hrtc, &alarm_time, RTC_ALARM_A, RTC_FORMAT_BIN);
+				buf_time = alarm_time.AlarmTime;
+				//buf_time = &alarm_time.AlarmTime;
+			}
+
+			hh = buf_time.Hours;
+			mm = buf_time.Minutes;
+			ss = buf_time.Seconds;
 
 			hours_tens = hh / 10;
 			hours_ones = hh % 10;
@@ -587,6 +699,7 @@ static void prvDisplayTime(void *p)
 
 			if(old_ss != ss)
 				{
+					_write("Time: ");
 					itoa(hh, numbuf, 10);
 					_write(numbuf);
 					_write(":");
@@ -595,13 +708,24 @@ static void prvDisplayTime(void *p)
 					_write(":");
 					itoa(ss, numbuf, 10);
 					_writeln(numbuf);
+
+					_write("Alarm Time: ");
+					itoa(alarm_time.AlarmTime.Hours, numbuf, 10);
+					_write(numbuf);
+					_write(":");
+					itoa(alarm_time.AlarmTime.Minutes, numbuf, 10);
+					_write(numbuf);
+					_write(":");
+					itoa(alarm_time.AlarmTime.Seconds, numbuf, 10);
+					_writeln(numbuf);
+					_writeln(" ");
 					old_ss = ss;
 				}
 		}
-
 		else
 		{
 			//convert to string for debugging
+			_write("Time: ");
 			itoa(hh, numbuf, 10);
 			_write(numbuf);
 			_write(":");
@@ -612,23 +736,33 @@ static void prvDisplayTime(void *p)
 			_writeln(numbuf);
 			_writeln(" ");
 
+			_write("Alarm Time: ");
+			itoa(alarm_time.AlarmTime.Hours, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(alarm_time.AlarmTime.Minutes, numbuf, 10);
+			_write(numbuf);
+			_write(":");
+			itoa(alarm_time.AlarmTime.Seconds, numbuf, 10);
+			_writeln(numbuf);
+			_writeln(" ");
+
 			sec_exp = pdFALSE;
 			xTimerReset(second, portMAX_DELAY);
 		}
 	}
 }
 
-static void prvSecExp(TimerHandle_t xTimer)
+static void prvSecExp(TimerHandle_t xTimer) //ERIC
 {
 	(void) xTimer;
 	sec_exp = pdTRUE;
 }
 
-static void prvPwrOn(void *p)
+static void prvPwrOn(void *p) //ERIC
 {
 	(void) p;
 	int i;
-	/// TODO: Default running task on powerup. Like the flashing 12:00 you see on clocks when the power goes out
 	while(1)
 	{
 		if(xSemaphoreTake(sem_reset_state, portMAX_DELAY) == pdTRUE)
@@ -693,56 +827,123 @@ static void prvPwrOn(void *p)
 	}
 }
 
-static void prvIncHr(void *p)
+static void prvIncHr(void *p) //ERIC
 {
 	(void) p;
-	RTC_TimeTypeDef buf_time = current_time;
+	RTC_TimeTypeDef buf_time;
+	RTC_AlarmTypeDef alarm_time;
 
 	while(1)
 	{
 		if(xSemaphoreTake(sem_hr_task, portMAX_DELAY) == pdTRUE)
 		{
 			in_task = pdTRUE;
-			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
-			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+
+			if(alarm_on == pdTRUE)
+			{
+				HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_RESET);
+				HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+				alarm_on = pdFALSE;
+			}
+
+			if (alarm_set_mode == pdFALSE)
+			{
+				HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+				//HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			}
+			else
+			{
+				HAL_RTC_GetAlarm(&hrtc, &alarm_time, RTC_ALARM_A, RTC_FORMAT_BIN);
+				buf_time = alarm_time.AlarmTime;
+			}
+
 			buf_time.Hours++;
-			if (buf_time.Hours > 23)
-				buf_time.Hours = 0;
+			if (buf_time.Hours > 23) {	buf_time.Hours = 0; }
 			buf_time.Seconds = 0;
-			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
-			vTaskDelay(pdMS_TO_TICKS(350));
-			in_task= pdFALSE;
+			buf_time.DayLightSaving = 0;
+			buf_time.StoreOperation = RTC_STOREOPERATION_RESET;
+
+			if (alarm_set_mode == pdFALSE)
+			{
+				if (HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN) == HAL_OK)
+					_writeln("RTC hour set OK");
+				else
+					_writeln("Problem setting RTC hour");
+			}
+			else
+			{
+				alarm_time.Alarm = RTC_ALARM_A;
+				alarm_time.AlarmTime.DayLightSaving = 0;
+				alarm_time.AlarmTime = buf_time;
+				HAL_RTC_SetAlarm(&hrtc, &alarm_time, RTC_FORMAT_BIN);
+			}
+
+			vTaskDelay(pdMS_TO_TICKS(250));
+			in_task = pdFALSE;
 		}
 	}
 }
 
-static void prvIncMin(void *p)
+static void prvIncMin(void *p) //ERIC
 {
 	(void) p;
-	RTC_TimeTypeDef buf_time = current_time;
+	RTC_TimeTypeDef buf_time;
+	RTC_AlarmTypeDef alarm_time;
 
 	while(1)
 	{
 		if(xSemaphoreTake(sem_min_task, portMAX_DELAY) == pdTRUE)
 		{
 			in_task = pdTRUE;
-			HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
-			HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+
+			if(alarm_on == pdTRUE)
+			{
+				HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_RESET);
+				HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+				alarm_on = pdFALSE;
+			}
+
+			if (alarm_set_mode == pdFALSE)
+			{
+				HAL_RTC_GetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+				//HAL_RTC_GetDate(&hrtc, NULL, RTC_FORMAT_BIN);
+			}
+			else
+			{
+				HAL_RTC_GetAlarm(&hrtc, &alarm_time, RTC_ALARM_A, RTC_FORMAT_BIN);
+				buf_time = alarm_time.AlarmTime;
+			}
+
 			buf_time.Minutes++;
-			if (buf_time.Minutes > 59)
-				buf_time.Minutes = 0;
+			if (buf_time.Minutes > 59) { buf_time.Minutes = 0; }
 			buf_time.Seconds = 0;
-			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
-			vTaskDelay(pdMS_TO_TICKS(350));
-			in_task= pdFALSE;
+			buf_time.DayLightSaving = 0;
+			buf_time.StoreOperation = RTC_STOREOPERATION_RESET;
+
+			if (alarm_set_mode == pdFALSE)
+			{
+				if (HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN) == HAL_OK)
+					_writeln("RTC minute set OK");
+				else
+					_writeln("Problem setting RTC minute");
+			}
+			else
+			{
+				alarm_time.Alarm = RTC_ALARM_A;
+				alarm_time.AlarmTime = buf_time;
+				HAL_RTC_SetAlarm(&hrtc, &alarm_time, RTC_FORMAT_BIN);
+			}
+
+			vTaskDelay(pdMS_TO_TICKS(250));
+			in_task = pdFALSE;
 		}
 	}
 }
 
-static void prvKillTask(void *p)
+static void prvKillTask(void *p) //ERIC
 {
 	(void) p;
-	RTC_TimeTypeDef buf_time = current_time;
+	RTC_TimeTypeDef buf_time;
 
 	while(1)
 	{
@@ -750,13 +951,111 @@ static void prvKillTask(void *p)
 		{
 			HAL_GPIO_WritePin(ANODE_A_GPIO_Port, ALL_ANODE, GPIO_PIN_RESET);
 			vTaskDelete(taskH_startup_task);
-			buf_time.Hours = 00;
-			buf_time.Minutes = 00;
-			HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
+			//buf_time.Hours = 00;
+			//buf_time.Minutes = 00;
+			//HAL_RTC_SetTime(&hrtc, &buf_time, RTC_FORMAT_BIN);
 
 		}
 	}
 }
+
+static void prvAlarmMode(void *p) //ERIC
+{
+	(void) p;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_alarm_mode, portMAX_DELAY) == pdTRUE)
+		{
+			in_task = pdTRUE;
+			if( alarm_set_mode == pdTRUE )
+			{
+				HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_RESET);
+				alarm_set_mode = pdFALSE;
+			}
+			else
+			{
+				HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_SET);
+				alarm_set_mode = pdTRUE;
+			}
+			vTaskDelay(150);
+			in_task = pdFALSE;
+		}
+	}
+}
+
+static void prvToggleAlarm(void *p)
+{
+	(void) p;
+
+	RTC_AlarmTypeDef alarm_time;
+	RTC_TimeTypeDef curr_time;
+	RTC_TimeTypeDef *buf_time;
+	RTC_DateTypeDef buf_date;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_alarm_toggle, portMAX_DELAY) == pdTRUE)
+		{
+			in_task = pdTRUE;
+
+			if(alarm_on == pdFALSE)
+			{
+				HAL_RTC_GetTime(&hrtc, &curr_time, RTC_FORMAT_BIN);
+				HAL_RTC_GetDate(&hrtc, &buf_date, RTC_FORMAT_BIN);
+
+				HAL_RTC_GetAlarm(&hrtc, &alarm_time, RTC_ALARM_A, RTC_FORMAT_BIN);
+				buf_time = &alarm_time.AlarmTime;
+				buf_time->DayLightSaving = 0;
+
+				alarm_time.Alarm = RTC_ALARM_A;
+				alarm_time.AlarmDateWeekDay = RTC_WEEKDAY_MONDAY;
+				alarm_time.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;
+				alarm_time.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+				alarm_time.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_NONE;
+
+				MX_NVIC_Init();
+				HAL_RTC_SetTime(&hrtc, &curr_time, RTC_FORMAT_BIN);
+				HAL_RTC_SetAlarm_IT(&hrtc, &alarm_time, RTC_FORMAT_BIN);
+				HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_SET);
+				alarm_on = pdTRUE;
+				alarm_stop = pdFALSE;
+			}
+			else
+			{
+				HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_RESET);
+				HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+				alarm_on = pdFALSE;
+				alarm_stop = pdTRUE;
+			}
+			vTaskDelay(150);
+			in_task = pdFALSE;
+		}
+	}
+}
+
+static void prvFireAlarm(void *p)
+{
+	(void) p;
+
+	while(1)
+	{
+		if(xSemaphoreTake(sem_alarm_fire, portMAX_DELAY) == pdTRUE)
+		{
+		_writeln("ALARM!");
+		vTaskDelay(pdMS_TO_TICKS(750));
+		if(alarm_stop == pdFALSE)
+			xSemaphoreGive(sem_alarm_fire);
+		}
+	}
+}
+
+/*
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
+{
+	xSemaphoreGive(sem_alarm_fire);
+}
+*/
 /* USER CODE END 4 */
 
 /* StartDefaultTask function */
