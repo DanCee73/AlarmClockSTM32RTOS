@@ -59,8 +59,6 @@
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
-DAC_HandleTypeDef hdac;
-
 RTC_HandleTypeDef hrtc;
 
 SD_HandleTypeDef hsd;
@@ -95,12 +93,12 @@ SemaphoreHandle_t sem_kill_task = NULL;
 SemaphoreHandle_t sem_alarm_mode = NULL;
 SemaphoreHandle_t sem_alarm_toggle = NULL;
 SemaphoreHandle_t sem_alarm_fire = NULL;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DAC_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SDIO_SD_Init(void);
 static void MX_USART2_UART_Init(void);
@@ -155,7 +153,6 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DAC_Init();
   MX_SPI1_Init();
   MX_SDIO_SD_Init();
   MX_USART2_UART_Init();
@@ -316,31 +313,6 @@ static void MX_NVIC_Init(void)
   HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
 }
 
-/* DAC init function */
-static void MX_DAC_Init(void)
-{
-
-  DAC_ChannelConfTypeDef sConfig;
-
-    /**DAC Initialization 
-    */
-  hdac.Instance = DAC;
-  if (HAL_DAC_Init(&hdac) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-    /**DAC channel OUT1 config 
-    */
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
-  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
-  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-}
-
 /* RTC init function */
 static void MX_RTC_Init(void)
 {
@@ -499,7 +471,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(alarm_on_led_GPIO_Port, alarm_on_led_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, alarm_on_led_Pin|GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(alarm_set_GPIO_Port, alarm_set_Pin, GPIO_PIN_RESET);
@@ -537,12 +509,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : alarm_on_led_Pin */
-  GPIO_InitStruct.Pin = alarm_on_led_Pin;
+  /*Configure GPIO pins : alarm_on_led_Pin PA4 */
+  GPIO_InitStruct.Pin = alarm_on_led_Pin|GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(alarm_on_led_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : alarm_EN_Pin */
   GPIO_InitStruct.Pin = alarm_EN_Pin;
@@ -1043,9 +1015,12 @@ static void prvFireAlarm(void *p)
 		if(xSemaphoreTake(sem_alarm_fire, portMAX_DELAY) == pdTRUE)
 		{
 		_writeln("ALARM!");
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_4);
 		vTaskDelay(pdMS_TO_TICKS(750));
 		if(alarm_stop == pdFALSE)
 			xSemaphoreGive(sem_alarm_fire);
+		else
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
 		}
 	}
 }
