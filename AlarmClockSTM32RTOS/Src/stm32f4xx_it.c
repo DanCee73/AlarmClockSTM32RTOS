@@ -41,12 +41,18 @@ extern BaseType_t pwr_reset;
 extern SemaphoreHandle_t sem_hr_task;
 extern SemaphoreHandle_t sem_min_task;
 extern SemaphoreHandle_t sem_kill_task;
+extern SemaphoreHandle_t sem_alarm_mode;
+extern SemaphoreHandle_t sem_alarm_toggle;
+extern SemaphoreHandle_t sem_alarm_fire;
 extern BaseType_t in_task;
+extern BaseType_t alarm_set_mode;
+extern BaseType_t alarm_on;
 
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
 extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
+extern RTC_HandleTypeDef hrtc;
 
 extern TIM_HandleTypeDef htim1;
 
@@ -102,9 +108,7 @@ void EXTI0_IRQHandler(void)
 void EXTI1_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI1_IRQn 0 */
-
 	    //INTERRUPT HANDLER FOR MINUTE BUTTON
-
   /* USER CODE END EXTI1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
   /* USER CODE BEGIN EXTI1_IRQn 1 */
@@ -117,6 +121,26 @@ void EXTI1_IRQHandler(void)
 	  if(in_task == pdFALSE)
 		  xSemaphoreGiveFromISR(sem_min_task, NULL);
   /* USER CODE END EXTI1_IRQn 1 */
+}
+
+/**
+* @brief This function handles EXTI line4 interrupt.
+*/
+void EXTI4_IRQHandler(void)
+{
+  /* USER CODE BEGIN EXTI4_IRQn 0 */
+		// TOGGLE ALARM ON/OFF
+  /* USER CODE END EXTI4_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
+  /* USER CODE BEGIN EXTI4_IRQn 1 */
+  if(pwr_reset == pdTRUE)
+  {
+	  xSemaphoreGiveFromISR(sem_kill_task, NULL);
+	  pwr_reset = pdFALSE;
+  }
+  if(in_task == pdFALSE)
+	  xSemaphoreGiveFromISR(sem_alarm_toggle, NULL);
+  /* USER CODE END EXTI4_IRQn 1 */
 }
 
 /**
@@ -144,8 +168,28 @@ void EXTI15_10_IRQHandler(void)
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
-
+  if(pwr_reset == pdTRUE)
+  {
+	  xSemaphoreGiveFromISR(sem_kill_task, NULL);
+	  pwr_reset = pdFALSE;
+  }
+  if(in_task == pdFALSE)
+	  xSemaphoreGiveFromISR(sem_alarm_mode, NULL);
   /* USER CODE END EXTI15_10_IRQn 1 */
+}
+
+/**
+* @brief This function handles RTC alarms A and B interrupt through EXTI line 17.
+*/
+void RTC_Alarm_IRQHandler(void)
+{
+  /* USER CODE BEGIN RTC_Alarm_IRQn 0 */
+
+  /* USER CODE END RTC_Alarm_IRQn 0 */
+  HAL_RTC_AlarmIRQHandler(&hrtc);
+  /* USER CODE BEGIN RTC_Alarm_IRQn 1 */
+  xSemaphoreGiveFromISR(sem_alarm_fire, NULL);
+  /* USER CODE END RTC_Alarm_IRQn 1 */
 }
 
 /**
