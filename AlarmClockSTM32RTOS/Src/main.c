@@ -94,8 +94,10 @@ static void MX_SDIO_SD_Init(void);
 static void MX_DAC_Init(void);
 static void MX_TIM6_Init(void);
 void StartDefaultTask(void const * argument);
-void soundTest(void *pvParameters);
+
 /* USER CODE BEGIN PFP */
+void soundTest(void *pvParameters);
+
 /* Private function prototypes -----------------------------------------------*/
 
 /* USER CODE END PFP */
@@ -138,11 +140,14 @@ int main(void)
   MX_RTC_Init();
   MX_SPI1_Init();
   MX_SDIO_SD_Init();
-  MX_DAC_Init();
   MX_TIM6_Init();
+  MX_DAC_Init();
   /* USER CODE BEGIN 2 */
 
   xTaskCreate(soundTest,(const char* const) "sound test",1024,0,1,0);
+  HAL_TIM_Base_Start(&htim6); // setup the timer 6 base
+  HAL_DAC_Start(&hdac,DAC_CHANNEL_1); // setup the DAC on channel 1 (PA4)
+  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*) sine_wave_array, 32, DAC_ALIGN_12B_R);
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -194,15 +199,6 @@ int main(void)
   * @brief System Clock Configuration
   * @retval None
   */
-
-void soundTest(void *pvParameters){
-	while(1){
-	HAL_TIM_Base_Start(&htim6); // setup the timer 6 base
-	 // HAL_DAC_Start(&hdac,DAC_CHANNEL_1); // setup the DAC on channel 1 (PA4)
-	  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)sine_wave_array, 32, DAC_ALIGN_12B_R); // setup dac on channel 1 (PA4) with sine wave array with a length of 32 and aligned to the right with 12 bits
-	  HAL_DAC_SetValue(&hdac,DAC_CHANNEL_1,DAC_ALIGN_12B_R,(uint32_t)sine_wave_array); // set the PA4 pin to the the value of sine wave array
-	}
-}
 void SystemClock_Config(void)
 {
 
@@ -395,10 +391,10 @@ static void MX_TIM6_Init(void)
 
 }
 
-/**
+/** 
   * Enable DMA controller clock
   */
-static void MX_DMA_Init(void)
+static void MX_DMA_Init(void) 
 {
   /* DMA controller clock enable */
   __HAL_RCC_DMA1_CLK_ENABLE();
@@ -417,6 +413,7 @@ static void MX_DMA_Init(void)
         * EVENT_OUT
         * EXTI
      PC3   ------> I2S2_SD
+     PA4   ------> SharedAnalog_PA4
      PC7   ------> I2S3_MCK
 */
 static void MX_GPIO_Init(void)
@@ -479,6 +476,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PA4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pin : BOOT1_Pin */
   GPIO_InitStruct.Pin = BOOT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -524,7 +527,22 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void soundTest(void *pvParameters){
 
+	double *data= (double *)malloc(sizeof(double));
+
+	while(1){
+		for (int x = 0; x<32 ; x++){
+			*(data+x) = (double)3.3*( (double) sine_wave_array[x] / (double)4096);
+		}
+		  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, data, 32, DAC_ALIGN_12B_R); // setup dac on channel 1 (PA4) with sine wave array with a length of 32 and aligned to the right with 12 bits
+
+	//	for (int x = 0; x<32 ; x++){
+		//	HAL_DAC_SetValue(&hdac,DAC_CHANNEL_1,DAC_ALIGN_12B_R, 2.2 ); //((uint32_t*)sine_wave_array[x]) set the PA4 pin to the the value of sine wave array
+		//}
+	}
+
+}
 /* USER CODE END 4 */
 
 /* StartDefaultTask function */

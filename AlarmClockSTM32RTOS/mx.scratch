@@ -1,14 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Project>
-<ProjectName>/home/eric/Dev/School/AlarmClockSTM32RTOS/AlarmClockSTM32RTOS/\AlarmClockSTM32RTOS</ProjectName>
+<ProjectName>C:\Users\Daniel\git\AlarmClockSTM32RTOS\AlarmClockSTM32RTOS\\AlarmClockSTM32RTOS</ProjectName>
 <ProjectNature>C</ProjectNature> 
-<CMSIS>../Drivers/CMSIS</CMSIS>
-<HAL_Driver>/home/eric/STM32Cube/Repository//STM32Cube_FW_F4_V1.21.0/Drivers/CMSIS</HAL_Driver>
+<CMSIS>..\Drivers\CMSIS</CMSIS>
+<HAL_Driver>C:\Users\Daniel\STM32Cube\Repository\STM32Cube_FW_F4_V1.21.0\Drivers\CMSIS</HAL_Driver>
 <Toolchain>TrueSTUDIO</Toolchain>
 <Version>0</Version>
 
 <filestoremove>
     <file>
+    <name>..\Src\main.c</name>
+    <name>..\Src\bsp_driver_sd.c</name>
+    <name>..\Src\sd_diskio.c</name>
+    <name>..\Src\fatfs.c</name>
+    <name>..\Src\usbh_diskio.c</name>
+    <name>..\Src\freertos.c</name>
+    <name>..\Src\usb_host.c</name>
+    <name>..\Src\usbh_conf.c</name>
+    <name>..\Src\usbh_platform.c</name>
+    <name>..\Src\stm32f4xx_it.c</name>
+    <name>..\Src\stm32f4xx_hal_msp.c</name>
+    <name>..\Src\stm32f4xx_hal_timebase_TIM.c</name>
+    <name>..\\Src\system_stm32f4xx.c</name>
     </file>
 </filestoremove>
 
@@ -17,6 +30,17 @@
 	   <include></include>
     </Aincludes>
 	<Cincludes>
+	   		<include>../Drivers/STM32F4xx_HAL_Driver/Inc</include>
+	   		<include>../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy</include>
+	   		<include>../Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F</include>
+	   		<include>../Middlewares/ST/STM32_USB_Host_Library/Core/Inc</include>
+	   		<include>../Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc</include>
+	   		<include>../Drivers/CMSIS/Device/ST/STM32F4xx/Include</include>
+	   		<include>../Middlewares/Third_Party/FatFs/src</include>
+	   		<include>../Middlewares/Third_Party/FreeRTOS/Source/include</include>
+	   		<include>../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS</include>
+	   		<include>../Drivers/CMSIS/Include</include>
+	   		<include>../Inc</include>
     </Cincludes>
 </inctoremove>
 
@@ -42,31 +66,33 @@
 		   		<include></include>
     </Aincludes>
     <Cdefines>
-        <define>__weak=&quot;__attribute__((weak))&quot;</define>
-        <define>__packed=&quot;__attribute__((__packed__))&quot;</define>
+        <define>__weak=__attribute__((weak))</define>
+        <define>__packed=__attribute__((__packed__))</define>
     </Cdefines>
     <definestoremove>
         <Adefines>
             <define></define>
         </Adefines>
         <Cdefines>
+            <define>__weak=&quot;__attribute__((weak))&quot;</define>
+            <define>__packed=&quot;__attribute__((__packed__))&quot;</define>
             <define>USE_FULL_LL_DRIVER</define>
             <define>MBEDTLS_CONFIG_FILE=&quot;mbedtls_config.h&quot;</define>
         </Cdefines>         
     </definestoremove>
     
 	<Cincludes>
-	   <include>../Inc</include>
-	   <include>../Drivers/STM32F4xx_HAL_Driver/Inc</include>
-	   <include>../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy</include>
-	   <include>../Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F</include>
-	   <include>../Middlewares/ST/STM32_USB_Host_Library/Core/Inc</include>
-	   <include>../Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc</include>
-	   <include>../Drivers/CMSIS/Device/ST/STM32F4xx/Include</include>
-	   <include>../Middlewares/Third_Party/FatFs/src</include>
-	   <include>../Middlewares/Third_Party/FreeRTOS/Source/include</include>
-	   <include>../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS</include>
-	   <include>../Drivers/CMSIS/Include</include>
+	   <include>..\Inc</include>
+	   <include>..\Drivers\STM32F4xx_HAL_Driver\Inc</include>
+	   <include>..\Drivers\STM32F4xx_HAL_Driver\Inc\Legacy</include>
+	   <include>..\Middlewares\Third_Party\FreeRTOS\Source\portable\GCC\ARM_CM4F</include>
+	   <include>..\Middlewares\ST\STM32_USB_Host_Library\Core\Inc</include>
+	   <include>..\Middlewares\ST\STM32_USB_Host_Library\Class\MSC\Inc</include>
+	   <include>..\Drivers\CMSIS\Device\ST\STM32F4xx\Include</include>
+	   <include>..\Middlewares\Third_Party\FatFs\src</include>
+	   <include>..\Middlewares\Third_Party\FreeRTOS\Source\include</include>
+	   <include>..\Middlewares\Third_Party\FreeRTOS\Source\CMSIS_RTOS</include>
+	   <include>..\Drivers\CMSIS\Include</include>
 
     </Cincludes>
       </config>
